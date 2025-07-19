@@ -37,7 +37,7 @@ ui_state:
 
     '
   last_voice_mode: predefined
-  last_predefined_voice: Emily.wav
+  last_predefined_voice: Elena.wav
   last_reference_file: Gianna.wav
   last_seed: 3000
   last_chunk_size: 240

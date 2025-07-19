@@ -16,6 +16,8 @@ build/
 .vscode/
 *.swp
 *.swo
+./tts-env/
+tts-env/
 
 # Ignore OS generated files
 .DS_Store
