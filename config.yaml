@@ -43,7 +43,7 @@ ui_state:
   last_chunk_size: 240
   last_split_text_enabled: true
   hide_chunk_warning: false
-  hide_generation_warning: false
+  hide_generation_warning: true
   theme: light
 ui:
   title: Chatterbox TTS Server

@@ -33,7 +33,8 @@ COPY requirements.txt .
 
 # Upgrade pip and install Python dependencies
 RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir -r requirements.txt
+    pip3 install --no-cache-dir -r requirements.txt && \
+    pip3 install --no-cache-dir uvicorn
 # Conditionally install NVIDIA dependencies if RUNTIME is set to 'nvidia'
 COPY requirements-nvidia.txt .
 
@@ -50,4 +51,4 @@ RUN mkdir -p model_cache reference_audio outputs voices logs hf_cache
 EXPOSE 8004
 
 # Command to run the application
-CMD ["python3", "server.py"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8004", "--workers", "4"]

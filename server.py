@@ -155,6 +155,14 @@ async def lifespan(app: FastAPI):
             )
         else:
             logger.info("TTS Model loaded successfully via engine.")
+            # --- Model Warmup ---
+            try:
+                logger.info("[WARMUP] Running dummy inference to warm up Chatterbox-TTS model...")
+                dummy_text = "This is a warmup test."
+                _audio, _sr = engine.synthesize(dummy_text)
+                logger.info("[WARMUP] Model warmup complete; ready for inference.")
+            except Exception as warmup_exc:
+                logger.warning(f"[WARMUP] Model warmup failed: {warmup_exc}")
             host_address = get_host()
             server_port = get_port()
             browser_thread = threading.Thread(
@@ -195,23 +203,6 @@ app.add_middleware(
 )
 
 # --- Static Files and HTML Templates ---
-ui_static_path = Path(__file__).parent / "ui"
-if ui_static_path.is_dir():
-    app.mount("/ui", StaticFiles(directory=ui_static_path), name="ui_static_assets")
-else:
-    logger.warning(
-        f"UI static assets directory not found at '{ui_static_path}'. UI may not load correctly."
-    )
-
-# This will serve files from 'ui_static_path/vendor' when requests come to '/vendor/*'
-if (ui_static_path / "vendor").is_dir():
-    app.mount(
-        "/vendor", StaticFiles(directory=ui_static_path / "vendor"), name="vendor_files"
-    )
-else:
-    logger.warning(
-        f"Vendor directory not found at '{ui_static_path}' /vendor. Wavesurfer might not load."
-    )
 
 
 @app.get("/styles.css", include_in_schema=False)
@@ -243,76 +234,14 @@ except RuntimeError as e_mount_outputs:
         "Output files may not be accessible via URL."
     )
 
-templates = Jinja2Templates(directory=str(ui_static_path))
 
 # --- API Endpoints ---
 
 
 # --- Main UI Route ---
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def get_web_ui(request: Request):
-    """Serves the main web interface (index.html)."""
-    logger.info("Request received for main UI page ('/').")
-    try:
-        return templates.TemplateResponse("index.html", {"request": request})
-    except Exception as e_render:
-        logger.error(f"Error rendering main UI page: {e_render}", exc_info=True)
-        return HTMLResponse(
-            "<html><body><h1>Internal Server Error</h1><p>Could not load the TTS interface. "
-            "Please check server logs for more details.</p></body></html>",
-            status_code=500,
-        )
 
 
 # --- API Endpoint for Initial UI Data ---
-@app.get("/api/ui/initial-data", tags=["UI Helpers"])
-async def get_ui_initial_data():
-    """
-    Provides all necessary initial data for the UI to render,
-    including configuration, file lists, and presets.
-    """
-    logger.info("Request received for /api/ui/initial-data.")
-    try:
-        full_config = get_full_config_for_template()
-        reference_files = utils.get_valid_reference_files()
-        predefined_voices = utils.get_predefined_voices()
-        loaded_presets = []
-        presets_file = ui_static_path / "presets.yaml"
-        if presets_file.exists():
-            with open(presets_file, "r", encoding="utf-8") as f:
-                yaml_content = yaml.safe_load(f)
-                if isinstance(yaml_content, list):
-                    loaded_presets = yaml_content
-                else:
-                    logger.warning(
-                        f"Invalid format in {presets_file}. Expected a list, got {type(yaml_content)}."
-                    )
-        else:
-            logger.info(
-                f"Presets file not found: {presets_file}. No presets will be loaded for initial data."
-            )
-
-        initial_gen_result_placeholder = {
-            "outputUrl": None,
-            "filename": None,
-            "genTime": None,
-            "submittedVoiceMode": None,
-            "submittedPredefinedVoice": None,
-            "submittedCloneFile": None,
-        }
-
-        return {
-            "config": full_config,
-            "reference_files": reference_files,
-            "predefined_voices": predefined_voices,
-            "presets": loaded_presets,
-            "initial_gen_result": initial_gen_result_placeholder,
-        }
-    except Exception as e:
-        logger.error(f"Error preparing initial UI data for API: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail="Failed to load initial data for UI."
-        )
 
 
 # --- Configuration Management API Endpoints ---
@@ -399,32 +328,6 @@ async def restart_server_endpoint():
 
 
 # --- UI Helper API Endpoints ---
-@app.get("/get_reference_files", response_model=List[str], tags=["UI Helpers"])
-async def get_reference_files_api():
-    """Returns a list of valid reference audio filenames (.wav, .mp3)."""
-    logger.debug("Request for /get_reference_files.")
-    try:
-        return utils.get_valid_reference_files()
-    except Exception as e:
-        logger.error(f"Error getting reference files for API: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail="Failed to retrieve reference audio files."
-        )
-
-
-@app.get(
-    "/get_predefined_voices", response_model=List[Dict[str, str]], tags=["UI Helpers"]
-)
-async def get_predefined_voices_api():
-    """Returns a list of predefined voices with display names and filenames."""
-    logger.debug("Request for /get_predefined_voices.")
-    try:
-        return utils.get_predefined_voices()
-    except Exception as e:
-        logger.error(f"Error getting predefined voices for API: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail="Failed to retrieve predefined voices list."
-        )
 
 
 # --- File Upload Endpoints ---
@@ -655,52 +558,19 @@ async def custom_tts_endpoint(
     )
     logger.debug(f"Input text (first 100 chars): '{request.text[:100]}...'")
 
-    audio_prompt_path_for_engine: Optional[Path] = None
-    if request.voice_mode == "predefined":
-        if not request.predefined_voice_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Missing 'predefined_voice_id' for 'predefined' voice mode.",
-            )
-        voices_dir = get_predefined_voices_path(ensure_absolute=True)
-        potential_path = voices_dir / request.predefined_voice_id
-        if not potential_path.is_file():
-            logger.error(f"Predefined voice file not found: {potential_path}")
-            raise HTTPException(
-                status_code=404,
-                detail=f"Predefined voice file '{request.predefined_voice_id}' not found.",
-            )
-        audio_prompt_path_for_engine = potential_path
-        logger.info(f"Using predefined voice: {request.predefined_voice_id}")
-
-    elif request.voice_mode == "clone":
-        if not request.reference_audio_filename:
-            raise HTTPException(
-                status_code=400,
-                detail="Missing 'reference_audio_filename' for 'clone' voice mode.",
-            )
-        ref_dir = get_reference_audio_path(ensure_absolute=True)
-        potential_path = ref_dir / request.reference_audio_filename
-        if not potential_path.is_file():
-            logger.error(
-                f"Reference audio file for cloning not found: {potential_path}"
-            )
-            raise HTTPException(
-                status_code=404,
-                detail=f"Reference audio file '{request.reference_audio_filename}' not found.",
-            )
-        max_dur = config_manager.get_int("audio_output.max_reference_duration_sec", 30)
-        is_valid, msg = utils.validate_reference_audio(potential_path, max_dur)
-        if not is_valid:
-            raise HTTPException(
-                status_code=400, detail=f"Invalid reference audio: {msg}"
-            )
-        audio_prompt_path_for_engine = potential_path
-        logger.info(
-            f"Using reference audio for cloning: {request.reference_audio_filename}"
-        )
-
-    perf_monitor.record("Parameters and voice path resolved")
+    # Always use the first .wav file in the voices directory as the default voice
+    voices_dir = get_predefined_voices_path(ensure_absolute=True)
+    default_voice_file = None
+    for item in voices_dir.iterdir():
+        if item.is_file() and item.suffix.lower() == ".wav":
+            default_voice_file = item
+            break
+    if not default_voice_file:
+        logger.error("No default voice found in voices directory.")
+        raise HTTPException(status_code=500, detail="No default voice available.")
+    audio_prompt_path_for_engine = default_voice_file
+    logger.info(f"Using default voice: {default_voice_file.name}")
+    perf_monitor.record("Default voice path resolved")
 
     all_audio_segments_np: List[np.ndarray] = []
     final_output_sample_rate = (
