@@ -30,12 +30,21 @@ audio_output:
   sample_rate: 24000
   max_reference_duration_sec: 30
 ui_state:
-  last_text: 'Are you tired of slow, unreliable connections? Upgrade today to Quantum
-    Fiber, the fastest internet in the galaxy! Experience seamless streaming, lag-free
-    gaming, and instant downloads. Call now and get your first three months half price!
-    Don''t wait, this offer won''t last forever!
+  last_text: 'I have successfully created the HTML template for the ''Debit Notes''
+    feature. This template includes:
 
-    '
+    A comprehensive list view of all debit notes with filtering and search options.
+
+    A ''Create New'' tab with a detailed form for generating new debit notes, including
+    line items, tax calculation, and notes.
+
+    An AI suggestion panel to assist with debit note creation.
+
+    Full adherence to the existing design consistency, color scheme, and layout structure
+    of your accounting UI files.
+
+    I''m attaching the debit_notes.html file for your review. Please let me know if
+    you have any further requests!'
   last_voice_mode: predefined
   last_predefined_voice: Elena.wav
   last_reference_file: Gianna.wav

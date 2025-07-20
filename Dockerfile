@@ -1,54 +1,37 @@
-FROM nvidia/cuda:12.8.1-runtime-ubuntu22.04
+FROM python:3.11-slim
 
-ARG RUNTIME=nvidia
-
-# Set environment variables
+# System setup
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV DEBIAN_FRONTEND=noninteractive
-# Set the Hugging Face home directory for better model caching
 ENV HF_HOME=/app/hf_cache
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    libsndfile1 \
-    ffmpeg \
-    python3 \
-    python3-pip \
-    python3-dev \
-    python3-venv \
-    git \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    libsndfile1 ffmpeg git \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Create a symlink for python3 to be python for convenience
-RUN ln -s /usr/bin/python3 /usr/bin/python
-
-# Set up working directory
 WORKDIR /app
 
-# Copy requirements first to leverage Docker cache
+# Copy requirements file
 COPY requirements.txt .
 
-# Upgrade pip and install Python dependencies
-RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir -r requirements.txt && \
-    pip3 install --no-cache-dir uvicorn
-# Conditionally install NVIDIA dependencies if RUNTIME is set to 'nvidia'
-COPY requirements-nvidia.txt .
+# Install all standard requirements (no torch/torchvision/torchaudio in this file!)
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN if [ "$RUNTIME" = "nvidia" ]; then \
-    pip3 install --no-cache-dir -r requirements-nvidia.txt; \
-    fi
-# Copy the rest of the application code
+# Install CUDA-specific, version-pinned torch/vision/audio last (guaranteed compatibility)
+RUN pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 --extra-index-url https://download.pytorch.org/whl/cu121
+
+# Confirm the CUDA/tv nms operator is present (important, will fail if mistakenly overwritten)
+RUN python -c "import torch, torchvision; print(torch.__version__, torchvision.__version__, hasattr(torch.ops.torchvision, 'nms'))"
+
+# Copy app code
 COPY . .
 
-# Create required directories for the application (fixed syntax error)
+# Create dir structure in the image
 RUN mkdir -p model_cache reference_audio outputs voices logs hf_cache
 
-# Expose the port the application will run on
 EXPOSE 8004
 
-# Command to run the application
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8004", "--workers", "4"]
+# Production start
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8004", "--workers", "3"]
