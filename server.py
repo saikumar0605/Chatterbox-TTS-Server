@@ -560,10 +560,10 @@ async def custom_tts_endpoint(
 
     # Always use the first .wav file in the voices directory as the default voice
     voices_dir = get_predefined_voices_path(ensure_absolute=True)
-    default_voice_file = voices_dir / "Emily.wav"
+    default_voice_file = voices_dir / "Olivia.wav"
     if not default_voice_file.is_file():
-        logger.error("Default voice 'Emily.wav' not found in voices directory.")
-        raise HTTPException(status_code=500, detail="Default voice 'Emily.wav' not available.")
+        logger.error("Default voice 'Olivia.wav' not found in voices directory.")
+        raise HTTPException(status_code=500, detail="Default voice 'Olivia.wav' not available.")
     audio_prompt_path_for_engine = default_voice_file
     logger.info(f"Using default voice: {default_voice_file.name}")
     perf_monitor.record("Default voice path resolved")

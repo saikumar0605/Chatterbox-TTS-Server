@@ -14,7 +14,7 @@ services:
       - ./outputs:/app/outputs
       - ./logs:/app/logs
       - hf_cache:/app/hf_cache
-    restart: unless-stopped
+    restart: always
     environment:
       - HF_HUB_ENABLE_HF_TRANSFER=1
       - NVIDIA_VISIBLE_DEVICES=all
