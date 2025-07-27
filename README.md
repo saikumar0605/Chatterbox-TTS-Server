@@ -72,6 +72,7 @@ This server application enhances the underlying `chatterbox-tts` engine with the
 *   **API Endpoint (`/tts`):**
     *   The primary API endpoint, offering fine-grained control over TTS generation.
     *   Supports parameters for text, voice mode (predefined/clone), reference/predefined voice selection, chunking control (`split_text`, `chunk_size`), generation settings (temperature, exaggeration, CFG weight, seed, speed factor, language), and output format.
+    *   **Optimized for real-time applications** - now defaults to Opus format for minimal latency.
 *   **UI Configuration Management:** Added UI section to view/edit `config.yaml` settings (server, model, paths) and save generation defaults.
 *   **Configuration System:** Uses `config.yaml` for all runtime configuration, managed via `config.py` (`YamlConfigManager`). If `config.yaml` is missing, it's created with default values from `config.py`.
 *   **Audio Post-Processing (Optional):** Includes utilities for silence trimming, internal silence reduction, and (if `parselmouth` is installed) unvoiced segment removal to improve audio quality. These are configurable.

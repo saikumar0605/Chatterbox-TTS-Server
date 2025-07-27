@@ -62,7 +62,7 @@ class CustomTTSRequest(BaseModel):
     )
 
     output_format: Optional[Literal["wav", "opus", "mp3"]] = Field(  # Added "mp3"
-        "wav", description="Desired audio output format."  # Default output format
+        "opus", description="Desired audio output format."  # Default output format optimized for streaming
     )
 
     split_text: Optional[bool] = Field(

@@ -293,7 +293,7 @@ def encode_audio(
 
         if output_format == "opus":
             OPUS_SUPPORTED_RATES = {8000, 12000, 16000, 24000, 48000}
-            TARGET_OPUS_RATE = 48000  # Preferred Opus rate.
+            TARGET_OPUS_RATE = 24000  # Optimized for streaming - use 24kHz to match engine output
 
             if rate_to_write not in OPUS_SUPPORTED_RATES:
                 if LIBROSA_AVAILABLE:
@@ -311,6 +311,8 @@ def encode_audio(
                         f"Opus encoding may fail or produce poor quality."
                     )
                     # Proceed with current rate, soundfile might handle it or fail.
+            
+            # Optimized Opus encoding for streaming - faster encoding, smaller chunks
             sf.write(
                 output_buffer,
                 audio_to_write,

@@ -16,6 +16,33 @@ from chatterbox.models.s3gen.const import (
 # Import the singleton config_manager
 from config import config_manager
 
+# Patch for chatterbox/models/s3gen/utils/mel.py to fix KeyError: 'cuda:0' on concurrent requests
+import torch
+
+def patch_hann_window():
+    try:
+        from chatterbox.models.s3gen.utils import mel
+        if not hasattr(mel, "hann_window"):
+            return
+        def get_hann_window(device):
+            if str(device) not in mel.hann_window:
+                mel.hann_window[str(device)] = torch.hann_window(
+                    mel.N_FFT, device=device
+                )
+            return mel.hann_window[str(device)]
+        mel.get_hann_window = get_hann_window
+        # Patch the mel_spectrogram function to always call get_hann_window
+        orig_mel_spectrogram = mel.mel_spectrogram
+        def patched_mel_spectrogram(y, sr, n_fft=None, hop_length=None, win_length=None, window=None, center=True, pad_mode="reflect", power=2.0, device=None):
+            device = y.device if hasattr(y, 'device') else torch.device("cpu")
+            mel.get_hann_window(device)
+            return orig_mel_spectrogram(y, sr, n_fft, hop_length, win_length, window, center, pad_mode, power, device)
+        mel.mel_spectrogram = patched_mel_spectrogram
+    except Exception as e:
+        print(f"[WARN] Failed to patch hann_window for chatterbox: {e}")
+
+patch_hann_window()
+
 logger = logging.getLogger(__name__)
 
 # --- Global Module Variables ---

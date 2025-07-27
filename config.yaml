@@ -19,14 +19,14 @@ paths:
   model_cache: model_cache
   output: outputs
 generation_defaults:
-  temperature: 0.8
-  exaggeration: 0.5
-  cfg_weight: 0.5
+  temperature: 0.5
+  exaggeration: 0.6
+  cfg_weight: 0.7
   seed: 0
   speed_factor: 1.0
   language: en
 audio_output:
-  format: wav
+  format: opus
   sample_rate: 24000
   max_reference_duration_sec: 30
 ui_state:
@@ -60,3 +60,7 @@ ui:
   max_predefined_voices_in_dropdown: 50
 debug:
   save_intermediate_audio: false
+audio_processing:
+  enable_silence_trimming: true
+  enable_internal_silence_fix: true
+  enable_unvoiced_removal: false

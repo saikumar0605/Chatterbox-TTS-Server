@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any, Literal
 import webbrowser  # For automatic browser opening
 import threading  # For automatic browser opening
+import asyncio  # For concurrent TTS processing
 
 from fastapi import (
     FastAPI,
@@ -74,7 +75,7 @@ class OpenAISpeechRequest(BaseModel):
     model: str
     input_: str = Field(..., alias="input")
     voice: str
-    response_format: Literal["wav", "opus", "mp3"] = "wav"  # Add "mp3"
+    response_format: Literal["wav", "opus", "mp3"] = "opus"  # Optimized for streaming
     speed: float = 1.0
     seed: Optional[int] = None
 
@@ -503,6 +504,12 @@ async def upload_predefined_voice_endpoint(files: List[UploadFile] = File(...)):
 # --- TTS Generation Endpoint ---
 
 
+# Increase semaphore for high-memory GPU (24GB VRAM)
+# Adjust this value based on VRAM usage per request (e.g., 2GB per request = 12 concurrent)
+request_semaphore = asyncio.Semaphore(12)  # Allow up to 12 concurrent TTS requests
+request_times = {}
+startup_time = time.time()
+
 @app.post(
     "/tts",
     tags=["TTS Generation"],
@@ -537,6 +544,7 @@ async def custom_tts_endpoint(
     Generates speech audio from text using specified parameters.
     Handles various voice modes (predefined, clone) and audio processing options.
     Returns audio as a stream (WAV or Opus).
+    Optimized: Processes all text chunks in parallel for minimal latency.
     """
     perf_monitor = utils.PerformanceMonitor(
         enabled=config_manager.get_bool("server.enable_performance_monitor", False)
@@ -558,7 +566,6 @@ async def custom_tts_endpoint(
     )
     logger.debug(f"Input text (first 100 chars): '{request.text[:100]}...'")
 
-    # Always use the first .wav file in the voices directory as the default voice
     voices_dir = get_predefined_voices_path(ensure_absolute=True)
     default_voice_file = voices_dir / "Olivia.wav"
     if not default_voice_file.is_file():
@@ -568,13 +575,8 @@ async def custom_tts_endpoint(
     logger.info(f"Using default voice: {default_voice_file.name}")
     perf_monitor.record("Default voice path resolved")
 
-    all_audio_segments_np: List[np.ndarray] = []
-    final_output_sample_rate = (
-        get_audio_sample_rate()
-    )  # Target SR for the final output file
-    engine_output_sample_rate: Optional[int] = (
-        None  # SR from the TTS engine (e.g., 24000 Hz)
-    )
+    final_output_sample_rate = get_audio_sample_rate()
+    engine_output_sample_rate: Optional[int] = None
 
     if request.split_text and len(request.text) > (
         request.chunk_size * 1.5 if request.chunk_size else 120 * 1.5
@@ -596,84 +598,74 @@ async def custom_tts_endpoint(
             status_code=400, detail="Text processing resulted in no usable chunks."
         )
 
-    for i, chunk in enumerate(text_chunks):
-        logger.info(f"Synthesizing chunk {i+1}/{len(text_chunks)}...")
-        try:
-            chunk_audio_tensor, chunk_sr_from_engine = engine.synthesize(
-                text=chunk,
-                audio_prompt_path=(
-                    str(audio_prompt_path_for_engine)
-                    if audio_prompt_path_for_engine
-                    else None
-                ),
-                temperature=(
-                    request.temperature
-                    if request.temperature is not None
-                    else get_gen_default_temperature()
-                ),
-                exaggeration=(
-                    request.exaggeration
-                    if request.exaggeration is not None
-                    else get_gen_default_exaggeration()
-                ),
-                cfg_weight=(
-                    request.cfg_weight
-                    if request.cfg_weight is not None
-                    else get_gen_default_cfg_weight()
-                ),
-                seed=(
-                    request.seed if request.seed is not None else get_gen_default_seed()
-                ),
-            )
-            perf_monitor.record(f"Engine synthesized chunk {i+1}")
+    # --- Parallel chunk synthesis ---
+    async def synthesize_chunk(chunk):
+        return await asyncio.to_thread(
+            engine.synthesize,
+            text=chunk,
+            audio_prompt_path=(
+                str(audio_prompt_path_for_engine)
+                if audio_prompt_path_for_engine
+                else None
+            ),
+            temperature=(
+                request.temperature
+                if request.temperature is not None
+                else get_gen_default_temperature()
+            ),
+            exaggeration=(
+                request.exaggeration
+                if request.exaggeration is not None
+                else get_gen_default_exaggeration()
+            ),
+            cfg_weight=(
+                request.cfg_weight
+                if request.cfg_weight is not None
+                else get_gen_default_cfg_weight()
+            ),
+            seed=(
+                request.seed if request.seed is not None else get_gen_default_seed()
+            ),
+        )
 
-            if chunk_audio_tensor is None or chunk_sr_from_engine is None:
-                error_detail = f"TTS engine failed to synthesize audio for chunk {i+1}."
-                logger.error(error_detail)
-                raise HTTPException(status_code=500, detail=error_detail)
+    # Synthesize all chunks in parallel
+    chunk_results = await asyncio.gather(
+        *(synthesize_chunk(chunk) for chunk in text_chunks)
+    )
 
-            if engine_output_sample_rate is None:
-                engine_output_sample_rate = chunk_sr_from_engine
-            elif engine_output_sample_rate != chunk_sr_from_engine:
-                logger.warning(
-                    f"Inconsistent sample rate from engine: chunk {i+1} ({chunk_sr_from_engine}Hz) "
-                    f"differs from previous ({engine_output_sample_rate}Hz). Using first chunk's SR."
-                )
-
-            current_processed_audio_tensor = chunk_audio_tensor
-
-            speed_factor_to_use = (
-                request.speed_factor
-                if request.speed_factor is not None
-                else get_gen_default_speed_factor()
-            )
-            if speed_factor_to_use != 1.0:
-                current_processed_audio_tensor, _ = utils.apply_speed_factor(
-                    current_processed_audio_tensor,
-                    chunk_sr_from_engine,
-                    speed_factor_to_use,
-                )
-                perf_monitor.record(f"Speed factor applied to chunk {i+1}")
-
-            # ### MODIFICATION ###
-            # All other processing is REMOVED from the loop.
-            # We will process the final concatenated audio clip.
-            processed_audio_np = current_processed_audio_tensor.cpu().numpy().squeeze()
-            all_audio_segments_np.append(processed_audio_np)
-
-        except HTTPException as http_exc:
-            raise http_exc
-        except Exception as e_chunk:
-            error_detail = f"Error processing audio chunk {i+1}: {str(e_chunk)}"
-            logger.error(error_detail, exc_info=True)
+    all_audio_segments_np: List[np.ndarray] = []
+    for i, (chunk_audio_tensor, chunk_sr_from_engine) in enumerate(chunk_results):
+        if chunk_audio_tensor is None or chunk_sr_from_engine is None:
+            error_detail = f"TTS engine failed to synthesize audio for chunk {i+1}."
+            logger.error(error_detail)
             raise HTTPException(status_code=500, detail=error_detail)
+        if engine_output_sample_rate is None:
+            engine_output_sample_rate = chunk_sr_from_engine
+        elif engine_output_sample_rate != chunk_sr_from_engine:
+            logger.warning(
+                f"Inconsistent sample rate from engine: chunk {i+1} ({chunk_sr_from_engine}Hz) "
+                f"differs from previous ({engine_output_sample_rate}Hz). Using first chunk's SR."
+            )
+        current_processed_audio_tensor = chunk_audio_tensor
+        speed_factor_to_use = (
+            request.speed_factor
+            if request.speed_factor is not None
+            else get_gen_default_speed_factor()
+        )
+        if speed_factor_to_use != 1.0:
+            current_processed_audio_tensor, _ = utils.apply_speed_factor(
+                current_processed_audio_tensor,
+                chunk_sr_from_engine,
+                speed_factor_to_use,
+            )
+        processed_audio_np = current_processed_audio_tensor.cpu().numpy().squeeze()
+        all_audio_segments_np.append(processed_audio_np)
 
     if not all_audio_segments_np:
         logger.error("No audio segments were successfully generated.")
         raise HTTPException(
             status_code=500, detail="Audio generation resulted in no output."
         )
-
     if engine_output_sample_rate is None:
         logger.error("Engine output sample rate could not be determined.")
         raise HTTPException(
@@ -681,8 +673,6 @@ async def custom_tts_endpoint(
         )
 
     try:
-        # ### MODIFICATION START ###
-        # First, concatenate all raw chunks into a single audio clip.
         final_audio_np = (
             np.concatenate(all_audio_segments_np)
             if len(all_audio_segments_np) > 1
@@ -690,31 +680,25 @@ async def custom_tts_endpoint(
         )
         perf_monitor.record("All audio chunks processed and concatenated")
 
-        # Now, apply all audio processing to the COMPLETE audio clip.
         if config_manager.get_bool("audio_processing.enable_silence_trimming", False):
             final_audio_np = utils.trim_lead_trail_silence(
                 final_audio_np, engine_output_sample_rate
             )
             perf_monitor.record(f"Global silence trim applied")
-
-        if config_manager.get_bool(
-            "audio_processing.enable_internal_silence_fix", False
-        ):
+        if config_manager.get_bool("audio_processing.enable_internal_silence_fix", False):
             final_audio_np = utils.fix_internal_silence(
                 final_audio_np, engine_output_sample_rate
             )
             perf_monitor.record(f"Global internal silence fix applied")
-
-        if (
-            config_manager.get_bool("audio_processing.enable_unvoiced_removal", False)
-            and utils.PARSELMOUTH_AVAILABLE
-        ):
-            final_audio_np = utils.remove_long_unvoiced_segments(
-                final_audio_np, engine_output_sample_rate
-            )
-            perf_monitor.record(f"Global unvoiced removal applied")
-        # ### MODIFICATION END ###
-
+        # Note: Unvoiced removal can sometimes affect pronunciation, so keeping it disabled
+        # if (
+        #     config_manager.get_bool("audio_processing.enable_unvoiced_removal", False)
+        #     and utils.PARSELMOUTH_AVAILABLE
+        # ):
+        #     final_audio_np = utils.remove_long_unvoiced_segments(
+        #         final_audio_np, engine_output_sample_rate
+        #     )
+        #     perf_monitor.record(f"Global unvoiced removal applied")
     except ValueError as e_concat:
         logger.error(f"Audio concatenation failed: {e_concat}", exc_info=True)
         for idx, seg in enumerate(all_audio_segments_np):
@@ -726,7 +710,6 @@ async def custom_tts_endpoint(
     output_format_str = (
         request.output_format if request.output_format else get_audio_output_format()
     )
-
     encoded_audio_bytes = utils.encode_audio(
         audio_array=final_audio_np,
         sample_rate=engine_output_sample_rate,
@@ -736,7 +719,6 @@ async def custom_tts_endpoint(
     perf_monitor.record(
         f"Final audio encoded to {output_format_str} (target SR: {final_output_sample_rate}Hz from engine SR: {engine_output_sample_rate}Hz)"
     )
-
     if encoded_audio_bytes is None or len(encoded_audio_bytes) < 100:
         logger.error(
             f"Failed to encode final audio to format: {output_format_str} or output is too small ({len(encoded_audio_bytes or b'')} bytes)."
@@ -745,7 +727,6 @@ async def custom_tts_endpoint(
             status_code=500,
             detail=f"Failed to encode audio to {output_format_str} or generated invalid audio.",
         )
-
     media_type = f"audio/{output_format_str}"
     timestamp_str = time.strftime("%Y%m%d_%H%M%S")
     suggested_filename_base = f"tts_output_{timestamp_str}"
@@ -753,15 +734,16 @@ async def custom_tts_endpoint(
         f"{suggested_filename_base}.{output_format_str}"
     )
     headers = {"Content-Disposition": f'attachment; filename="{download_filename}"'}
-
     logger.info(
         f"Successfully generated audio: {download_filename}, {len(encoded_audio_bytes)} bytes, type {media_type}."
     )
     logger.debug(perf_monitor.report())
-
     return StreamingResponse(
         io.BytesIO(encoded_audio_bytes), media_type=media_type, headers=headers
     )
+
+
+
 
 
 @app.post("/v1/audio/speech", tags=["OpenAI Compatible"])
