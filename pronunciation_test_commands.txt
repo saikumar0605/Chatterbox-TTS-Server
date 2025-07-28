@@ -1,0 +1,87 @@
+# Pronunciation Improvement Test Commands
+# Test these different parameter combinations to find the best pronunciation
+
+# Test 1: Higher CFG Weight (Better pronunciation adherence)
+curl -X POST "http://localhost:8004/tts" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "The quick brown fox jumps over the lazy dog. This is a test of pronunciation quality.",
+    "voice_mode": "predefined",
+    "cfg_weight": 0.8,
+    "temperature": 0.6,
+    "exaggeration": 0.6
+  }' \
+  --output test_high_cfg.opus
+
+# Test 2: Lower Temperature (More deterministic, clearer pronunciation)
+curl -X POST "http://localhost:8004/tts" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "The quick brown fox jumps over the lazy dog. This is a test of pronunciation quality.",
+    "voice_mode": "predefined",
+    "cfg_weight": 0.7,
+    "temperature": 0.4,
+    "exaggeration": 0.5
+  }' \
+  --output test_low_temp.opus
+
+# Test 3: Balanced settings (Recommended starting point)
+curl -X POST "http://localhost:8004/tts" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "The quick brown fox jumps over the lazy dog. This is a test of pronunciation quality.",
+    "voice_mode": "predefined",
+    "cfg_weight": 0.7,
+    "temperature": 0.5,
+    "exaggeration": 0.6
+  }' \
+  --output test_balanced.opus
+
+# Test 4: High exaggeration (Clearer speech)
+curl -X POST "http://localhost:8004/tts" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "The quick brown fox jumps over the lazy dog. This is a test of pronunciation quality.",
+    "voice_mode": "predefined",
+    "cfg_weight": 0.7,
+    "temperature": 0.5,
+    "exaggeration": 0.8
+  }' \
+  --output test_high_exag.opus
+
+# Test 5: Very conservative settings (Maximum clarity)
+curl -X POST "http://localhost:8004/tts" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "The quick brown fox jumps over the lazy dog. This is a test of pronunciation quality.",
+    "voice_mode": "predefined",
+    "cfg_weight": 0.9,
+    "temperature": 0.3,
+    "exaggeration": 0.7
+  }' \
+  --output test_conservative.opus
+
+# Test 6: Different voice (some voices have better pronunciation)
+curl -X POST "http://localhost:8004/tts" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "The quick brown fox jumps over the lazy dog. This is a test of pronunciation quality.",
+    "voice_mode": "predefined",
+    "predefined_voice_id": "Elena.wav",
+    "cfg_weight": 0.7,
+    "temperature": 0.5,
+    "exaggeration": 0.6
+  }' \
+  --output test_elena_voice.opus
+
+# Test 7: Test with complex words
+curl -X POST "http://localhost:8004/tts" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "The pronunciation of words like 'pronunciation', 'sophisticated', 'extraordinary', and 'phenomenon' should be clear and accurate.",
+    "voice_mode": "predefined",
+    "cfg_weight": 0.8,
+    "temperature": 0.4,
+    "exaggeration": 0.7
+  }' \
+  --output test_complex_words.opus 
