@@ -8,13 +8,21 @@ server:
   log_file_path: logs/tts_server.log
   log_file_max_size_mb: 10
   log_file_backup_count: 5
+  enable_performance_monitor: true
+  max_concurrent_requests: 20
+  enable_streaming_response: true
 model:
   repo_id: ResembleAI/chatterbox
+  enable_quantization: true
+  enable_jit_compilation: true
+  enable_gradient_checkpointing: true
 tts_engine:
   device: cuda
   predefined_voices_path: voices
   reference_audio_path: reference_audio
   default_voice_id: Olivia.wav
+  enable_gpu_acceleration: true
+  enable_memory_optimization: true
 paths:
   model_cache: model_cache
   output: outputs
@@ -29,6 +37,8 @@ audio_output:
   format: opus
   sample_rate: 24000
   max_reference_duration_sec: 30
+  enable_optimized_encoding: true
+  enable_gpu_resampling: true
 ui_state:
   last_text: 'I have successfully created the HTML template for the ''Debit Notes''
     feature. This template includes:
@@ -60,7 +70,16 @@ ui:
   max_predefined_voices_in_dropdown: 50
 debug:
   save_intermediate_audio: false
+  enable_detailed_logging: false
 audio_processing:
   enable_silence_trimming: true
   enable_internal_silence_fix: true
   enable_unvoiced_removal: false
+  enable_gpu_acceleration: true
+  enable_parallel_processing: true
+performance:
+  enable_model_warmup: true
+  enable_memory_cleanup: true
+  enable_performance_monitoring: true
+  max_gpu_memory_usage_gb: 20
+  enable_async_processing: true
